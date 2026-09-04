@@ -1,0 +1,85 @@
+name: daily-taxcase
+
+# 每日定时任务：
+#   05:00 采集候选（只出报告，人工确认后录入）
+#   07:00 数据质检 + 确定性自动修复 + 重建看板（自动提交修复结果）
+# 也支持在 Actions 页面手动点 "Run workflow" 立即执行。
+#
+# 注意：cron 用 UTC 时间。下面为北京时间（UTC+8）05:00 / 07:00，即 UTC 21:00 / 23:00（前一天）。
+on:
+  schedule:
+    - cron: "0 21 * * *"   # 北京时间 05:00 采集
+    - cron: "0 23 * * *"   # 北京时间 07:00 质检
+  workflow_dispatch:
+    inputs:
+      task:
+        description: "手动执行：collect=采集 / lint=质检 / all=两者"
+        required: true
+        default: "all"
+        type: choice
+        options: [all, collect, lint]
+
+permissions:
+  contents: write   # 允许 lint 自动提交修复后的 index.html / analysis.html
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      # 采集依赖 coze-coding-ai 搜索 CLI；CI 环境若无该 CLI/鉴权则自动跳过采集（质检不受影响）。
+      - name: 检查搜索 CLI
+        id: cli
+        run: |
+          if command -v coze-coding-ai >/dev/null 2>&1; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::未检测到 coze-coding-ai，采集步骤将跳过（质检仍会执行）"
+          fi
+
+      # 05:00 采集（调度触发）或手动选 collect/all
+      - name: 每日采集候选
+        if: >-
+          (github.event_name == 'schedule' && github.event.schedule == '0 21 * * *')
+          || (github.event_name == 'workflow_dispatch' && (inputs.task == 'collect' || inputs.task == 'all'))
+        env:
+          HAS_CLI: ${{ steps.cli.outputs.available }}
+        run: |
+          if [ "$HAS_CLI" != "true" ]; then echo "跳过采集：无 coze-coding-ai CLI"; exit 0; fi
+          bash scripts/run-daily-tasks.sh collect
+
+      # 07:00 质检+修复+重建（调度触发）或手动选 lint/all
+      - name: 数据质检 + 自动修复 + 重建看板
+        if: >-
+          (github.event_name == 'schedule' && github.event.schedule == '0 23 * * *')
+          || github.event_name == 'workflow_dispatch'
+        run: bash scripts/run-daily-tasks.sh lint
+
+      # 上传采集候选报告为构建产物，供人工下载确认
+      - name: 上传候选报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: collect-reports
+          path: reports/
+          if-no-files-found: ignore
+
+      # lint 的确定性修复 + 重建结果自动提交回仓库（仅数据文件；采集报告 reports/ 走 artifact 不入库；无改动则跳过）
+      - name: 提交质检修复结果
+        if: github.event_name != 'pull_request'
+        run: |
+          git config user.name "taxcase-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add index.html analysis.html
+          if git diff --cached --quiet; then
+            echo "无修复/重建改动，跳过提交"
+          else
+            git commit -m "chore(lint): 每日数据质检自动修复 + 重建看板 [skip ci]"
+            git push
+          fi
