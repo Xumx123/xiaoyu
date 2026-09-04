@@ -11,27 +11,38 @@
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
-LOG_DIR="/app/work/logs/bypass"
-mkdir -p "$LOG_DIR"
-TS="$(date +%Y-%m-%d)"
-LOG="$LOG_DIR/daily-tasks.log"
-
-log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG"; }
+# 日志：本地运行写入 /app/work/logs/bypass/daily-tasks.log；CI（GitHub Actions）无该目录，
+# 直接输出到 stdout，便于在 Actions 页面查看（GITHUB_ACTIONS 环境变量由 runner 自动注入为 true）。
+if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
+  LOG=""
+  log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
+  runlog() { "$@"; }            # CI：不重定向，Node 输出直接进 Actions 日志
+else
+  LOG_DIR="/app/work/logs/bypass"
+  mkdir -p "$LOG_DIR"
+  LOG="$LOG_DIR/daily-tasks.log"
+  log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG"; }
+  runlog() { "$@" >> "$LOG" 2>&1; }  # 本地：追加到日志文件
+fi
 
 collect() {
   log "=== [collect] 每日案例采集开始 ==="
-  node scripts/daily-collect.js "$@" >> "$LOG" 2>&1 \
-    && log "=== [collect] 采集完成，候选报告见 reports/collect-${TS}.md（待人工确认录入）===" \
-    || log "=== [collect] 采集失败，请检查日志 ==="
+  if runlog node scripts/daily-collect.js "$@"; then
+    log "=== [collect] 采集完成，候选报告见 reports/collect-$(date +%Y-%m-%d).md（待人工确认录入）==="
+  else
+    log "=== [collect] 采集失败，请检查日志 ==="
+  fi
 }
 
 lint() {
   log "=== [lint] 数据质检+自动修复开始 ==="
-  node scripts/data-lint.js --fix >> "$LOG" 2>&1
+  runlog node scripts/data-lint.js --fix
   log "--- 重建看板 analysis.html ---"
-  node build-analysis.js >> "$LOG" 2>&1 \
-    && log "=== [lint] 质检+重建完成（exit $?）===" \
-    || log "=== [lint] 重建失败，请检查日志 ==="
+  if runlog node build-analysis.js; then
+    log "=== [lint] 质检+重建完成 ==="
+  else
+    log "=== [lint] 重建失败，请检查日志 ==="
+  fi
 }
 
 case "${1:-all}" in
