@@ -30,13 +30,19 @@ const ROOT = path.resolve(__dirname, '..');
 const INDEX = path.join(ROOT, 'index.html');
 const OUT_DIR = process.env.COLLECT_DIR || path.join(ROOT, 'reports');
 
-// 采集关键词：覆盖 5 类案例的主要信息源（上市公司公告优先，非上市取重大案件）
-const QUERIES = [
-  '2026年 上市公司 补缴税款 滞纳金 公告 不涉及行政处罚',
-  '2026年 上市公司 子公司 收到 税务处理决定书 追缴',
-  '2026年 税务局 曝光 虚开发票 骗取出口退税 案件 亿元',
-  '2026年 上市公司 税务 行政处罚 罚款 证监会 财务造假',
-  '2026年 新三板 北交所 自查补缴税款 公告',
+// 采集关键词模板：覆盖 5 类案例的主要信息源（上市公司公告优先，非上市取重大案件）
+// {y}=当前年份，{ly}=去年；每次运行自动替换，保证既能追近期、又能回溯上一年补录
+const QUERY_TEMPLATES = [
+  '{y}年 上市公司 补缴税款 滞纳金 公告 不涉及行政处罚',
+  '{y}年 上市公司 子公司 收到 税务事项通知书 税务处理决定书 追缴',
+  '{y}年 上市公司 收到税务风险提示 自查 补缴企业所得税 当期损益',
+  '{y}年 上市公司 补缴增值税 消费税 资源税 房产税 公告',
+  '{y}年 税务局 曝光 虚开发票 骗取出口退税 案件 亿元',
+  '{y}年 上市公司 税务 行政处罚 罚款 证监会 财务造假',
+  '{y}年 新三板 北交所 自查补缴税款 公告',
+  '{y}年 港股 美股 上市公司 补缴税款 税务 公告',
+  '{ly}年 上市公司 补缴税款 滞纳金 公告 不涉及行政处罚',
+  '{ly}年 上市公司 子公司 税务处理决定书 追缴 罚款',
 ];
 
 // 收录门槛（与 AGENTS.md 口径一致）
@@ -163,6 +169,10 @@ function reviewProgress(cases) {
 function main() {
   const html = fs.readFileSync(INDEX, 'utf8');
   const cases = extractCases(html);
+  // 时间窗：当前年份 + 去年，覆盖跨年披露与历史补录
+  const y = new Date().getFullYear();
+  const ly = y - 1;
+  const QUERIES = QUERY_TEMPLATES.map(t => t.replace(/\{y\}/g, y).replace(/\{ly\}/g, ly));
   const queries = QUERIES.concat(process.argv.slice(2));
   const today = new Date().toISOString().slice(0, 10);
 
