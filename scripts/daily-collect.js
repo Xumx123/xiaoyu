@@ -10,6 +10,9 @@
  *   人工确认后再按 AGENTS.md 数据规范整理进 index.html，并运行：
  *     node scripts/data-lint.js --fix  &&  node build-analysis.js
  *
+ *   另含「进行中案件进展复查」：自动检索 outcome.status==='progress' 的案件最新进展，
+ *   写入报告供人工确认后更新（本脚本不改库；联网更新只能在有 coze-coding-ai 的环境进行）。
+ *
  * 用法：
  *   node scripts/daily-collect.js                 # 用内置关键词搜索近期待收录线索
  *   node scripts/daily-collect.js "自定义关键词"   # 追加自定义查询
@@ -134,6 +137,29 @@ function gateJudge(entry) {
   return { pass, reason, amountWan: Math.round(wan), hasListed, highAlert };
 }
 
+// 进展复查：对 outcome.status === 'progress' 的「处理中」案件，搜索最新进展，供人工确认后更新
+function reviewProgress(cases) {
+  const watching = cases.filter((c) => c.outcome && c.outcome.status === 'progress');
+  if (!watching.length) return [];
+  console.log(`\n[进展复查] 待跟进案件 ${watching.length} 件，逐一搜索最新进展…`);
+  const reviews = [];
+  watching.forEach((c, i) => {
+    const short = String(c.company || '').replace(/[（(].*$/, '').trim();
+    const q = `${short} 税务 补缴 判决 上诉 进展 ${new Date().getFullYear()}`;
+    console.log(`  (${i + 1}/${watching.length}) ${short}`);
+    const raw = runSearch(q, 5);
+    let entries = [];
+    if (!raw.startsWith('__SEARCH_ERROR__')) {
+      entries = splitEntries(raw)
+        .filter((e) => /补缴|税务|判决|上诉|进展|处罚|裁定|终审|缴|追缴|留抵/.test(e.title + e.snippet))
+        .slice(0, 3)
+        .map((e) => ({ title: e.title, url: e.url, snippet: e.snippet.slice(0, 200) }));
+    }
+    reviews.push({ id: c.id, company: c.company, code: c.code, date: c.date, statusNotes: c.outcome.notes || [], latest: entries });
+  });
+  return reviews;
+}
+
 function main() {
   const html = fs.readFileSync(INDEX, 'utf8');
   const cases = extractCases(html);
@@ -164,9 +190,12 @@ function main() {
   const belowBar = fresh.filter((c) => !c.gate.pass);
   const dupHits = candidates.filter((c) => c.dup.length > 0);
 
+  // 进行中案件进展复查
+  const progress = reviewProgress(cases);
+
   fs.mkdirSync(OUT_DIR, { recursive: true });
   const jsonPath = path.join(OUT_DIR, `collect-${today}.json`);
-  fs.writeFileSync(jsonPath, JSON.stringify({ date: today, totalInLib: cases.length, candidates }, null, 2), 'utf8');
+  fs.writeFileSync(jsonPath, JSON.stringify({ date: today, totalInLib: cases.length, candidates, progressReview: progress }, null, 2), 'utf8');
 
   // Markdown 报告
   const md = [];
@@ -187,10 +216,29 @@ function main() {
   belowBar.forEach((c) => md.push(`- ${c.title} ｜ ${c.gate.reason} ｜ ${c.url || ''}`));
   md.push(`\n## 🔁 疑似已收录（${dupHits.length}，自动跳过）\n`);
   dupHits.forEach((c) => md.push(`- ${c.title} ｜ 命中：${c.dup.join('；')}`));
+
+  // —— 进行中案件进展复查 ——
+  md.push(`\n## ⏳ 进行中案件 · 进展复查（${progress.length}）\n`);
+  md.push('> 下列案件当前标记为「处理中/待跟进」，已自动搜索最新进展。请人工核实后更新案件状态/要点；如已结案请将 outcome.status 改为 done。\n');
+  if (!progress.length) md.push('（当前无「处理中」案件）');
+  progress.forEach((r) => {
+    md.push(`### id${r.id} ${r.company}（${r.code || ''}，原披露 ${r.date || '-'}）`);
+    md.push(`- 上次记录：${(r.statusNotes || []).join('；')}`);
+    if (!r.latest.length) md.push('- 本次未检索到明确新进展（或搜索不可用）\n');
+    else {
+      r.latest.forEach((e) => {
+        md.push(`- ${e.title}`);
+        md.push(`  - ${e.snippet}`);
+        if (e.url) md.push(`  - ${e.url}`);
+      });
+      md.push('');
+    }
+  });
+
   const mdPath = path.join(OUT_DIR, `collect-${today}.md`);
   fs.writeFileSync(mdPath, md.join('\n'), 'utf8');
 
-  console.log(`\n检索完成：线索 ${candidates.length}｜待确认候选 ${toReview.length}｜低于门槛 ${belowBar.length}｜疑似已收录 ${dupHits.length}`);
+  console.log(`\n检索完成：线索 ${candidates.length}｜待确认候选 ${toReview.length}｜低于门槛 ${belowBar.length}｜疑似已收录 ${dupHits.length}｜进行中复查 ${progress.length}`);
   console.log(`候选报告：${mdPath}`);
   console.log(`机读数据：${jsonPath}\n`);
 }
