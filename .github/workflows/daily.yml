@@ -1,15 +1,16 @@
 name: daily-taxcase
 
 # 每日定时任务：
-#   07:00 数据质检 + 确定性自动修复 + 重建看板（自动提交），并建一条 Issue 同步结果、@负责人邮件提醒
+#   07:00 数据质检 + 确定性自动修复 + 重建看板（自动提交回仓库）。
+#   结果不再发邮件/建 Issue——由维护者在会话中直接向用户汇报质检结果与异常项。
 #   采集（找新案例）依赖 coze-coding-ai 搜索能力，GitHub runner 无此工具，故不设定时；
-#   如需采集请在有搜索能力的环境手动触发 workflow_dispatch(task=collect/all)，或由维护者在会话中采集。
+#   新案例由用户提供/外部采集后在会话中确认录入。
 # 也支持在 Actions 页面手动点 "Run workflow" 立即执行。
 #
 # 注意：cron 用 UTC 时间。北京时间（UTC+8）07:00 = UTC 23:00（前一天）。
 on:
   schedule:
-    - cron: "0 23 * * *"   # 北京时间 07:00 质检 + 自动修复 + 重建 + 结果同步
+    - cron: "0 23 * * *"   # 北京时间 07:00 质检 + 自动修复 + 重建 + 自动提交
   workflow_dispatch:
     inputs:
       task:
@@ -21,7 +22,6 @@ on:
 
 permissions:
   contents: write   # 允许 lint 自动提交修复后的 index.html / analysis.html
-  issues: write     # 允许每天建一条质检结果 Issue（@负责人触发邮件提醒）
 
 jobs:
   run:
@@ -89,32 +89,5 @@ jobs:
             git push
           fi
 
-      # 每天把质检结果建一条 Issue 并 @负责人（自动触发邮件/通知），无需手动翻 Actions 日志
-      - name: 同步质检结果（Issue @负责人）
-        if: >-
-          always()
-          && (github.event_name == 'schedule'
-              || (github.event_name == 'workflow_dispatch' && (inputs.task == 'lint' || inputs.task == 'all')))
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set +e
-          LOG=$(ls -t reports/lint-*.log 2>/dev/null | head -1)
-          [ -z "$LOG" ] && LOG="reports/lint-$(date +%Y-%m-%d).log"
-          ERR=$(grep -oE "需人工处理 *error[：: ]+[0-9]+" "$LOG" 2>/dev/null | grep -oE "[0-9]+" | head -1); ERR=${ERR:-0}
-          FIX=$(grep -oE "可自动修复项[：: ]+[0-9]+" "$LOG" 2>/dev/null | grep -oE "[0-9]+" | head -1); FIX=${FIX:-0}
-          TOTAL=$(grep -oE "案例总数[：: ]+[0-9]+" "$LOG" 2>/dev/null | grep -oE "[0-9]+" | head -1)
-          DATE=$(date +%Y-%m-%d)
-          LOGTAIL=$(tail -60 "$LOG" 2>/dev/null)
-          BODY=$(printf '@Xumx123 每日数据质检已完成（北京时间 %s 早 7 点）。\n\n- 案例总数：%s 条\n- 自动修复（地区/代码/企业性质/日期/样式等格式问题）：%s 项\n- 需人工处理的异常（缺字段/疑似重复/分类存疑/金额异常）：%s 项\n- 看板 analysis.html：已按最新数据重建\n\n<details><summary>质检完整日志（点开展开）</summary>\n\n```\n%s\n```\n\n</details>\n\n> 说明：GitHub 无搜索工具，新案例采集/案件进展复查需由维护者在有搜索能力的环境执行。\n' "$DATE" "${TOTAL:-?}" "$FIX" "$ERR" "$LOGTAIL")
-          if [ "$ERR" -gt 0 ]; then
-            TITLE="⚠️ 每日质检 $DATE：发现 $ERR 项需人工处理"
-            LABELS="lint-report,needs-attention"
-          else
-            TITLE="✅ 每日质检 $DATE：通过，自动修复 $FIX 项"
-            LABELS="lint-report"
-          fi
-          gh label create lint-report --color "0E8A16" --description "每日数据质检结果" 2>/dev/null || true
-          gh label create needs-attention --color "D93F0B" --description "质检发现需人工处理项" 2>/dev/null || true
-          gh issue create --title "$TITLE" --label "$LABELS" --body "$BODY"
-          echo "已创建质检结果 Issue：$TITLE"
+      # 质检结果不再通过邮件/Issue 通知（用户要求在对话里同步）：
+      # 每天的质检情况由维护者在会话中直接向用户汇报，异常项在对话里给出处理建议。
