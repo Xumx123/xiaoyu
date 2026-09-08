@@ -2182,7 +2182,7 @@ function renderCards(data, keyword) {
   empty.style.display='none';
 
   grid.innerHTML = data.map((c,i) => {
-    const tags = c.taxTags.map(t=>`<span class="tag tag-tax">${t}</span>`).join('') +
+    const tags = (c.taxTags||[]).map(t=>`<span class="tag tag-tax">${t}</span>`).join('') +
       `<span class="tag tag-industry">${c.industryTag}</span>` +
       `<span class="tag tag-nature">${c.natureTag}</span>`;
     const desc = c.keyPoints ? c.keyPoints.slice(0,2).map(p=>p.replace(/<[^>]+>/g,'')).join('；') : '';
@@ -2244,7 +2244,7 @@ function renderTable(data, keyword) {
   }
 
   tbody.innerHTML = data.map(c => {
-    const tags = c.taxTags.map(t=>`<span class="tag tag-tax" style="font-size:11px">${t}</span>`).join(' ');
+    const tags = (c.taxTags||[]).map(t=>`<span class="tag tag-tax" style="font-size:11px">${t}</span>`).join(' ');
     const badgeTbl = c.badge ? `<span class="badge-count">${c.badge}</span>` : '';
     return `<tr onclick="openModal(${c.id})" style="cursor:pointer">
       <td>${c.date}</td>
@@ -2315,9 +2315,11 @@ function openModal(id) {
       </tbody></table></div>`;
   }
 
-  if (c.reportImpact && c.reportImpact.length) {
+  const reportItems = Array.isArray(c.reportImpact) ? c.reportImpact
+    : (typeof c.reportImpact === 'string' && c.reportImpact.trim()) ? [c.reportImpact] : [];
+  if (reportItems.length) {
     bodyHtml += `<div class="section"><div class="section-title"><span class="icon icon-report">📈</span>报表影响</div>
-      ${c.reportImpact.map(r=>{
+      ${reportItems.map(r=>{
         if(typeof r==='string'||typeof r==='number'){return `<div class="impact-line">${r}</div>`;}
         const it=(r.item||r.name||r.label||'').trim();
         const im=(r.impact!==undefined?r.impact:(r.value!==undefined?r.value:r.text||'')).toString().trim();
