@@ -464,6 +464,7 @@ const year2026=cases.filter(c=>c.date&&c.date.startsWith('2026')).length;
 // 板块归属（与案例库 boardOf 一致）
 function boardOf(code){
   const s=String(code||'');
+  if(/\.NQ$/i.test(s))return '新三板';
   if(/HK/i.test(s))return '港股';
   if(/US/i.test(s)||/^[A-Z]{2,}$/.test(s))return '美股';
   if(s==='非上市'||!s||s==='-'||s==='—')return '非上市';
