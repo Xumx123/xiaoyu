@@ -193,11 +193,9 @@ function main() {
 
     const fieldReplaceGlobal = (key, oldVal, newVal) => {
       let n = 0;
-      [`${key}:`, `"${key}":`].forEach((pre) => {
-        const s = `${pre}"${oldVal}"`, r = `${pre}"${newVal}"`;
-        const cnt = html.split(s).length - 1;
-        if (cnt > 0) { html = html.split(s).join(r); n += cnt; }
-      });
+      // 兼容两种对象写法：紧凑式 code:"x" 与 JSON 风格 "code": "x"（冒号后可能有空格）
+      const re = new RegExp(`("?${key}"?\\s*:\\s*)"${String(oldVal).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`, 'g');
+      html = html.replace(re, (m, p1) => { n++; return `${p1}"${newVal}"`; });
       return n;
     };
     // 区间内替换（typeClass / date），仅改该对象，按 start 降序避免偏移
@@ -207,11 +205,8 @@ function main() {
       const { start, end } = f.scope;
       let seg = html.slice(start, end);
       let n = 0;
-      [`${f.kind}:`, `"${f.kind}":`].forEach((pre) => {
-        const s = `${pre}"${f.old}"`, r = `${pre}"${f.neu}"`;
-        const cnt = seg.split(s).length - 1;
-        if (cnt > 0) { seg = seg.split(s).join(r); n += cnt; }
-      });
+      const sre = new RegExp(`("?${f.kind}"?\\s*:\\s*)"${String(f.old).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`, 'g');
+      seg = seg.replace(sre, (m, p1) => { n++; return `${p1}"${f.neu}"`; });
       if (n > 0) { html = html.slice(0, start) + seg + html.slice(end); applied += n; }
     });
     // 全局字段替换（region / code / enterprise）
